@@ -84,8 +84,6 @@ class MagiaTileTcdm(gvsoc.systree.Component):
     NARROW_OBI_STACK = 0
     NARROW_OBI_L1    = 1
     NARROW_SPATZ     = 2
-    NB_SPATZ_VLSU    = 4
-    NB_NARROW        = NARROW_SPATZ + (NB_SPATZ_VLSU if MagiaArch.SPATZ_ENABLE else 0)
 
     # Wide ports
     WIDE_NOC          = 0
@@ -94,14 +92,16 @@ class MagiaTileTcdm(gvsoc.systree.Component):
     WIDE_REDMULE      = 3
     NB_WIDE           = 4
 
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, nb_spatz_vlsu: int):
         super().__init__(parent, name)
+
+        self.nb_narrow = self.NARROW_SPATZ + (nb_spatz_vlsu if MagiaArch.SPATZ_ENABLE else 0)
 
         nb_banks = MagiaArch.N_MEM_BANKS
         bank_size = MagiaArch.N_WORDS_BANK * MagiaArch.BYTES_PER_WORD
 
         ico = MagiaTcdmInterco(self, 'ico', config=MagiaTcdmIntercoConfig(
-            nb_masters=self.NB_NARROW,
+            nb_masters=self.nb_narrow,
             nb_slaves=nb_banks,
             interleaving_width=int(math.log2(MagiaArch.BYTES_PER_WORD)),
             nb_wide_masters=self.NB_WIDE))
@@ -111,7 +111,7 @@ class MagiaTileTcdm(gvsoc.systree.Component):
                 size=bank_size, atomics=True, latency=MagiaDSE.TILE_TCDM_LATENCY))
             ico.o_OUTPUT(i, bank.i_INPUT())
 
-        for i in range(self.NB_NARROW):
+        for i in range(self.nb_narrow):
             self.bind(self, f'narrow_input_{i}', ico, f'input_{i}')
 
         for i in range(self.NB_WIDE):
@@ -192,7 +192,7 @@ class MagiaV3Tile(gvsoc.systree.Component):
             # as soon as we issue the fetch enable)
             config = SpatzConfig(isa="rv32imfdcav", fetch_enable=False,
                 boot_addr=MagiaArch.SPATZ_BOOTROM_ADDR, hart_id=tid + tree.nb_clusters,
-                htif=False, nb_lanes=MagiaTileTcdm.NB_SPATZ_VLSU, lane_width=4, vlsu_v2=True,
+                htif=False, nb_lanes=tree.spatz_nb_lanes, lane_width=MagiaDSE.SPATZ_LANE_WIDTH, vlsu_v2=True,
                 vlen=tree.spatz_vlen, nb_ipus=1)
 
             snitch_spatz = Spatz(self, f'tile-{tid}-snitch-spatz', config=config)
@@ -234,7 +234,7 @@ class MagiaV3Tile(gvsoc.systree.Component):
         #
 
         # Data scratchpad
-        l1_tcdm = MagiaTileTcdm(self, f'tile-{tid}-tcdm')
+        l1_tcdm = MagiaTileTcdm(self, f'tile-{tid}-tcdm', nb_spatz_vlsu=tree.spatz_nb_lanes)
 
         # AXI and OBI x-bars. They stream beats at the narrow width, one beat
         # per cycle per channel, with round-robin arbitration between inputs
@@ -360,7 +360,7 @@ class MagiaV3Tile(gvsoc.systree.Component):
             snitch_spatz_i_cache.o_REFILL(obi_xbar.i_INPUT(OBI_IN_SPATZ_REFILL))
 
             # Snitch spatz TCDM
-            for port in range(0, MagiaTileTcdm.NB_SPATZ_VLSU):
+            for port in range(0, tree.spatz_nb_lanes):
                 snitch_spatz.o_VLSU(port, l1_tcdm.i_SNITCH_SPATZ(port))
 
             # Snitch spatz core complex registers

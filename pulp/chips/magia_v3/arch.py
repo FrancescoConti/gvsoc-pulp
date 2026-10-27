@@ -84,8 +84,6 @@ class MagiaArch:
     SPATZ_BOOTROM_ADDR         = 0x1000_0000
     SPATZ_BOOTROM_SIZE         = 0x100
     SPATZ_ROMFILE              = ''
-    # Default VLEN in bits, as in the RTL (SPATZ_VLEN), overridden by spatz_vlen
-    SPATZ_VLEN                 = 256
 
     # Pulp Cores
     PULP_ENABLE         = True
@@ -142,20 +140,28 @@ class MagiaTree(Tree):
             raise RuntimeError(f'l2_size must be a multiple of 4 KiB in '
                 f'(0, {MagiaArch.L2_MAX_SIZE:#x}] (got {self.l2_size:#x})')
 
-        # Design-space knobs: Spatz VLEN and RedMulE array size
+        # Design-space knobs: Spatz VLEN and lanes, RedMulE array size
         self.spatz_vlen = TargetParameter(parent, name='spatz_vlen',
-            value=MagiaArch.SPATZ_VLEN, cast=int,
+            value=MagiaDSE.SPATZ_VLEN, cast=int,
             description='Spatz VLEN in bits').value
+        self.spatz_nb_lanes = TargetParameter(parent, name='spatz_nb_lanes',
+            value=MagiaDSE.SPATZ_NB_LANES, cast=int,
+            description='Spatz lanes (RTL N_FPU), also the number of VLSU ports').value
         self.redmule_h = TargetParameter(parent, name='redmule_h',
             value=MagiaDSE.REDMULE_H, cast=int,
             description='RedMulE array height (RTL ARRAY_HEIGHT)').value
         self.redmule_w = TargetParameter(parent, name='redmule_w',
             value=MagiaDSE.REDMULE_W, cast=int,
             description='RedMulE array width (RTL ARRAY_WIDTH)').value
-        for name in ('spatz_vlen', 'redmule_h', 'redmule_w'):
+        for name in ('spatz_vlen', 'spatz_nb_lanes', 'redmule_h', 'redmule_w'):
             v = getattr(self, name)
             if v <= 0 or v & (v - 1):
                 raise RuntimeError(f'{name} must be a power of two (got {v})')
+        # A vector register spans at least one VRF word of nb_lanes elements of the lane width
+        if self.spatz_vlen < self.spatz_nb_lanes * MagiaDSE.SPATZ_LANE_WIDTH * 8:
+            raise RuntimeError(f'spatz_vlen must be at least spatz_nb_lanes * '
+                f'{MagiaDSE.SPATZ_LANE_WIDTH * 8} (got spatz_vlen={self.spatz_vlen}, '
+                f'spatz_nb_lanes={self.spatz_nb_lanes})')
 
         if MagiaArch.SPATZ_ENABLE:
             self.romfile = Value(self, 'spatz_romfile', MagiaArch.SPATZ_ROMFILE, cast=str,
@@ -199,6 +205,12 @@ class MagiaDSE:
     TILE_IDMA_NUM_AX_IN_FLIGHT  = 16
     TILE_IDMA_BUFFER_DEPTH      = 3
     TILE_IDMA_JOB_FIFO_DEPTH    = 16
+
+    # Spatz, as in the RTL (SPATZ_VLEN, N_FPU, ELEN / 8), overridden by spatz_vlen and
+    # spatz_nb_lanes. The lanes also set the number of VLSU ports on the TCDM.
+    SPATZ_VLEN                  = 256
+    SPATZ_NB_LANES              = 4
+    SPATZ_LANE_WIDTH            = 4
 
     # RedMulE array, as in the RTL (ARRAY_HEIGHT, ARRAY_WIDTH, PIPE_REGS), overridden by
     # redmule_h and redmule_w
